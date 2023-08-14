@@ -1,0 +1,74 @@
+- name: 40-Deploy Rollback
+  hosts: win
+  gather_facts: false
+  vars_files:
+    - Deployment_Variables.txt
+  vars:
+    iis_configuration_json: "{{ lookup('file', 'iis-webapp-config.json') | from_json }}"
+    binding_port: "{{ iis_configuration_json.Bindings | regex_search('\\d+') }}"
+
+  tasks:
+    - name: "Register {{ app_name }} Deployed Package Folder stat to check existance"
+      win_stat:
+        path: "{{ iis_configuration_json.PhysicalPath }}\\"
+      register: deployed_package_folder_stat
+
+    - name: "Fail if {{ app_name }} Deployed Package Folder doesn't exists IIS Server"
+      ansible.builtin.fail:
+        msg: "New Package Folder doesn't exists in IIS Server"
+      when: deployed_package_folder_stat.stat.exists != true
+
+    - name: "Register {{ app_name }}_{{ timestamp }}.zip Rollback Package Folder stat to check existance in IIS Server"
+      win_stat:
+        path: "{{ Old_Package_Backup_Path }}\\{{ app_name }}_{{ timestamp }}.zip"
+      register: rollback_package_folder_stat
+
+    - name: Fail if {{ app_name }}_{{ timestamp }}.zip Rollback Package Folder doesn't exists in IIS Server
+      ansible.builtin.fail:
+        msg: "{{ app_name }}_{{ timestamp }}.zip Rollback Package Folder doesn't exists in IIS Server"
+      when: rollback_package_folder_stat.stat.exists != true
+
+    - name: "Rollback - Delete {{ app_name }} Folder"
+      win_file:
+        path: "{{ iis_configuration_json.PhysicalPath }}"
+        state: absent
+
+    - name: Unzip {{ app_name }} Old Backup
+      community.windows.win_unzip:
+        src: "{{ Old_Package_Backup_Path }}\\{{ app_name }}_{{ timestamp }}.zip"
+        dest: "{{ Old_Package_Backup_Path }}\\"
+
+    - name: "Rollback - Copy {{ app_name }}_{{ timestamp }} Content to {{ app_name }} Directory"
+      win_copy:
+        remote_src: true
+        src: "{{ Old_Package_Backup_Path }}\\{{ app_name }}\\"
+        dest: "{{ iis_configuration_json.PhysicalPath }}"
+
+    - name: "Rollback - Ensure {{ iis_configuration_json.applicationPool }} is Restarted"
+      community.windows.win_iis_webapppool:
+        name: "{{ iis_configuration_json.applicationPool }}"
+        state: restarted
+
+    - name: "Rollback - Send GET Request to {{ app_name }} main page and ensure '200' is returned"
+      win_uri:
+        url: "http://localhost/{{ webApp_name }}"
+      register: rollback_http_output
+
+    - name: Rollback - Print Get Response code
+      debug:
+        var: rollback_http_output.status_code
+
+    - name: "Rollback - Fail if '{{ app_name }}'' response status code != '200'"
+      ansible.builtin.fail:
+        msg: "{{ app_name }} response status code != '200', Rollback Failed"
+      when: rollback_http_output.status_code != 200
+
+    - name: "Delete {{ app_name }}_{{ timestamp }} Rollback Folder"
+      win_file:
+        path: "{{ Old_Package_Backup_Path }}\\{{ app_name }}_{{ timestamp }}"
+        state: absent
+  
+    - name: "Delete {{ app_name }}_{{ timestamp }} Rollback Zip File"
+      win_file:
+        path: "{{ Old_Package_Backup_Path }}\\{{ app_name }}_{{ timestamp }}.zip"
+        state: absent

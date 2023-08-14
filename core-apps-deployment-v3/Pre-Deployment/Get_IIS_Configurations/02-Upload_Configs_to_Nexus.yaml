@@ -1,0 +1,22 @@
+- name: Clone IIS Configurations to Nexus
+  hosts: win
+  gather_facts: true
+  vars:
+    nexus_user: "{{ nexus_user }}"
+    nexus_password: "{{ nexus_password }}"
+  tasks:
+
+    - name: Make Zip File of Core-Apps Folder
+      community.windows.win_zip:
+         src: \\Win19-DevOpsProd\Public_Share_Name\core-apps\
+         dest: \\Win19-DevOpsProd\Public_Share_Name\core-apps.zip
+
+    - name: Upload CoreApps Zip File to Nexus
+      ansible.windows.win_command:
+         chdir: \\Win19-DevOpsProd\Public_Share_Name
+         cmd: "curl -v -u {{ nexus_user }}:{{ nexus_password }} --upload-file ./core-apps.zip http://10.1.1.52:8081/repository/IIS-Configurations-CoreApps/core-apps.zip"
+
+    - name: Delete CoreApps Zip File on Network Share
+      ansible.windows.win_file:
+         path: \\Win19-DevOpsProd\Public_Share_Name\core-apps.zip
+         state: absent

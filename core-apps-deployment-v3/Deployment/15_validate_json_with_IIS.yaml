@@ -1,0 +1,32 @@
+- name: Validate JSON with IIS
+  hosts: win
+  gather_facts: true
+  vars_files:
+    - Deployment_Variables.txt
+  vars:
+    iis_saved_configuration_json: "{{ lookup('file', 'iis-webapp-config.json') | from_json }}"
+
+  tasks:
+    - name: Retrieve {{ webApp_name }} IIS Configuration From  "{{ ansible_hostname }}"
+      win_iis_webapplication:
+        site: "Default Web Site"
+        name: "{{ webApp_name }}"
+      register: iis_webapp_current_configurations
+
+    - name: Print variable
+      ansible.builtin.debug:
+        var: iis_webapp_current_configurations
+
+    - name: print iis-webapp-config.json
+      ansible.builtin.debug:
+        var: iis_saved_configuration_json
+
+    - name: Fail if Current ApplicationPool != Saved ApplicationPool in iis-webapp-config.json
+      ansible.builtin.fail:
+        msg: "Current {{ iis_webapp_current_configurations.application_pool }} != Saved {{ iis_saved_configuration_json.applicationPool }}"
+      when: iis_webapp_current_configurations.application_pool != iis_saved_configuration_json.applicationPool
+
+    - name: Fail if Current Physical Path != Saved Physical Path in iis-webapp-config.json
+      ansible.builtin.fail:
+        msg: "Current {{ iis_webapp_current_configurations.site.PhysicalPath }} != Saved {{ iis_saved_configuration_json.PhysicalPath }}"
+      when: iis_webapp_current_configurations.physical_path != iis_saved_configuration_json.PhysicalPath

@@ -1,0 +1,71 @@
+def host_servers_content = """[win]
+$params.IIS_Server_Hostname
+
+[win:vars]
+ansible_connection = winrm
+ansible_port = 5985
+ansible_winrm_transport= kerberos
+"""
+
+def host_win_devops_content = """[win]
+Win19-DevOpsProd
+
+[win:vars]
+ansible_connection = winrm
+ansible_port = 5985
+ansible_winrm_transport= kerberos
+"""
+
+pipeline {
+    agent {  label 'master' }
+
+    stages {
+        
+        stage('Clean Up before Deploy') {
+            steps {
+                cleanWs()
+            }    
+        }
+        
+        stage('Clone Ansible Playbooks Git repo') {
+            steps {
+                echo "Cloning Ansible Playbooks Repo ...."
+                git credentialsId: 'Jenkins_Functional_Account-Prod', url: 'https://jenkins-sa-prod@bitbucket.org/btechlabs/core-apps-deployment-v3.git'
+            }
+        }
+
+        stage("Save Parameter to Ansible Files") {
+            steps {
+                echo "Save Jenkins Parameter into Ansible Files"
+                writeFile file: 'Pre-Deployment/Get_IIS_Configurations/host_servers.txt', text: host_servers_content
+                writeFile file: 'Pre-Deployment/Get_IIS_Configurations/host_win_devops.txt', text: host_win_devops_content
+            }
+        }
+
+        stage('Append Ansible-Prod Credentials to Hosts Files') {
+            steps {
+                withCredentials([usernamePassword(credentialsId: 'Ansible_Prod_Credentials', usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD')]) {
+                    sh "echo \"ansible_user=$USERNAME\" | tee -a Pre-Deployment/Get_IIS_Configurations/host_servers.txt"
+                    sh "echo \"ansible_password=$PASSWORD\" | tee -a Pre-Deployment/Get_IIS_Configurations/host_servers.txt"
+
+                    sh "echo \"ansible_user=$USERNAME\" | tee -a Pre-Deployment/Get_IIS_Configurations/host_win_devops.txt"
+                    sh "echo \"ansible_password=$PASSWORD\" | tee -a Pre-Deployment/Get_IIS_Configurations/host_win_devops.txt"
+                }
+            }
+        }
+        
+        stage('Run Ansible to get IIS Configs & WebConfig File') {
+            steps {
+                sh "/var/lib/jenkins/.local/bin/ansible-playbook -i Pre-Deployment/Get_IIS_Configurations/host_servers.txt Pre-Deployment/Get_IIS_Configurations/01-Get_IIS_Configs.yaml -vvv"
+            }    
+        }
+        
+        stage('Upload IIS Configs & WebConfig Files to Nexus') {
+            steps {
+                withCredentials([[$class: 'UsernamePasswordMultiBinding', credentialsId:'Nexus_Credentials', usernameVariable: 'USERNAME', passwordVariable: 'PASSWORD']]) {
+                   sh '/var/lib/jenkins/.local/bin/ansible-playbook --extra-vars "nexus_user=$USERNAME nexus_password=$PASSWORD" -i Pre-Deployment/Get_IIS_Configurations/host_win_devops.txt Pre-Deployment/Get_IIS_Configurations/02-Upload_Configs_to_Nexus.yaml -vvv' 
+                }             
+            }    
+        }
+    }
+}
